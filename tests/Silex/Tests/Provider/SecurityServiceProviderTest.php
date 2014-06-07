@@ -119,6 +119,31 @@ class SecurityServiceProviderTest extends WebTestCase
         $this->assertEquals('admin', $client->getResponse()->getContent());
     }
 
+    public function testSimplePreAuthentication()
+    {
+        $app = $this->createApplication('simplepre');
+        $app['debug'] = true;
+        $app['security.hide_user_not_found'] = false;
+
+        $client = new Client($app);
+
+        $client->request('get', '/');
+        $this->assertEquals(302, $client->getResponse()->getStatusCode());
+
+        $client->request('get', '/', array('apikey' => 'barfoo'));
+        $this->assertEquals('davidAUTHENTICATED', $client->getResponse()->getContent());
+        $client->request('get', '/admin', array('apikey' => 'barfoo'));
+        $this->assertEquals(403, $client->getResponse()->getStatusCode());
+
+        $client->request('get','/');
+        $this->assertEquals(302, $client->getResponse()->getStatusCode());
+
+        $client->request('get', '/', array('apikey' => 'foobar'));
+        $this->assertEquals('adminAUTHENTICATEDADMIN', $client->getResponse()->getContent());
+        $client->request('get', '/admin', array('apikey' => 'foobar'));
+        $this->assertEquals('admin', $client->getResponse()->getContent());
+    }
+
     public function testUserPasswordValidatorIsRegistered()
     {
         $app = new Application();
@@ -260,6 +285,55 @@ class SecurityServiceProviderTest extends WebTestCase
                         'dennis' => array('ROLE_USER', '5FZ2Z8QIkA7UTZ4BYkoC+GsReLf569mSKDsfods6LYQ8t+a8EW9oaircfMpmaLbPBh4FOBiiFyLfuZmTSUwzZg=='),
                         'admin'  => array('ROLE_ADMIN', '5FZ2Z8QIkA7UTZ4BYkoC+GsReLf569mSKDsfods6LYQ8t+a8EW9oaircfMpmaLbPBh4FOBiiFyLfuZmTSUwzZg=='),
                     ),
+                ),
+            ),
+            'security.access_rules' => array(
+                array('^/admin', 'ROLE_ADMIN'),
+            ),
+            'security.role_hierarchy' => array(
+                'ROLE_ADMIN' => array('ROLE_USER'),
+            ),
+        ));
+
+        $app->get('/', function() use ($app) {
+            $user = $app['security']->getToken()->getUser();
+
+            $content = is_object($user) ? $user->getUsername() : 'ANONYMOUS';
+
+            if ($app['security']->isGranted('IS_AUTHENTICATED_FULLY')) {
+                $content .= 'AUTHENTICATED';
+            }
+
+            if ($app['security']->isGranted('ROLE_ADMIN')) {
+                $content .= 'ADMIN';
+            }
+
+            return $content;
+        });
+
+        $app->get('/admin', function() use ($app) {
+            return 'admin';
+        });
+
+        return $app;
+    }
+
+
+    private function addSimplePreAuthentication($app)
+    {
+        $app->register(new \Silex\Provider\MonologServiceProvider(), array(
+            "monolog.logfile" => __DIR__ . "/SecurityServiceProviderTest/test.log"
+        ));
+
+        $app->register(new SecurityServiceProvider(), array(
+            'security.firewalls' => array(
+                'simplepre' => array(
+                    'pattern' => '^.*$',
+                    'stateless' => true,
+                    'pre_auth' => array(
+                        'authenticator' => new SecurityServiceProviderTest\SampleAuthenticator('apikey')
+                    ),
+                    'users' => new SecurityServiceProviderTest\SampleUserProvider
                 ),
             ),
             'security.access_rules' => array(

@@ -27,6 +27,7 @@ use Symfony\Component\Security\Core\User\InMemoryUserProvider;
 use Symfony\Component\Security\Core\Encoder\EncoderFactory;
 use Symfony\Component\Security\Core\Encoder\MessageDigestPasswordEncoder;
 use Symfony\Component\Security\Core\Authentication\Provider\DaoAuthenticationProvider;
+use Symfony\Component\Security\Core\Authentication\Provider\SimpleAuthenticationProvider;
 use Symfony\Component\Security\Core\Authentication\Provider\AnonymousAuthenticationProvider;
 use Symfony\Component\Security\Core\Authentication\AuthenticationProviderManager;
 use Symfony\Component\Security\Core\Authentication\AuthenticationTrustResolver;
@@ -42,6 +43,7 @@ use Symfony\Component\Security\Http\FirewallMap;
 use Symfony\Component\Security\Http\Firewall\AbstractAuthenticationListener;
 use Symfony\Component\Security\Http\Firewall\AccessListener;
 use Symfony\Component\Security\Http\Firewall\BasicAuthenticationListener;
+use Symfony\Component\Security\Http\Firewall\SimplePreAuthenticationListener;
 use Symfony\Component\Security\Http\Firewall\LogoutListener;
 use Symfony\Component\Security\Http\Firewall\SwitchUserListener;
 use Symfony\Component\Security\Http\Firewall\AnonymousAuthenticationListener;
@@ -147,9 +149,13 @@ class SecurityServiceProvider implements ServiceProviderInterface, EventListener
                     $app['security.authentication_listener.'.$name.'.'.$type] = $app['security.authentication_listener.'.$type.'._proto']($name, $options);
                 }
 
-                $provider = 'anonymous' === $type ? 'anonymous' : 'dao';
+                if ($type === 'anonymous' || $type === 'pre_auth') {
+                    $provider = $type;
+                } else {
+                    $provider = 'dao';
+                }
                 if (!isset($app['security.authentication_provider.'.$name.'.'.$provider])) {
-                    $app['security.authentication_provider.'.$name.'.'.$provider] = $app['security.authentication_provider.'.$provider.'._proto']($name);
+                    $app['security.authentication_provider.'.$name.'.'.$provider] = $app['security.authentication_provider.'.$provider.'._proto']($name, $options);
                 }
 
                 return array(
@@ -424,6 +430,18 @@ class SecurityServiceProvider implements ServiceProviderInterface, EventListener
             };
         });
 
+        $app['security.authentication_listener.pre_auth._proto'] = $app->protect(function ($providerKey, $options) use ($app) {
+            return function () use ($app, $providerKey, $options) {
+                return new SimplePreAuthenticationListener(
+                    $app['security'],
+                    $app['security.authentication_manager'],
+                    $providerKey,
+                    $options['authenticator'],
+                    isset($app['logger']) ? $app['logger'] : null
+                );
+            };
+        });
+
         $app['security.authentication_listener.http._proto'] = $app->protect(function ($providerKey, $options) use ($app) {
             return function () use ($app, $providerKey, $options) {
                 return new BasicAuthenticationListener(
@@ -520,6 +538,16 @@ class SecurityServiceProvider implements ServiceProviderInterface, EventListener
                     $name,
                     $app['security.encoder_factory'],
                     $app['security.hide_user_not_found']
+                );
+            };
+        });
+
+        $app['security.authentication_provider.pre_auth._proto'] = $app->protect(function ($name, $options) use ($app) {
+            return function () use ($app, $name, $options) {
+                return new SimpleAuthenticationProvider(
+                    $options['authenticator'],
+                    $app['security.user_provider.'.$name],
+                    $name
                 );
             };
         });
